@@ -1,0 +1,449 @@
+<!doctype html5>
+<html>
+
+<head>
+<title>TreeKEM</title>
+<script src="./dist/index.js"></script>
+<script src="./web/jquery-3.3.1.min.js"></script>
+<script>
+
+const ok = (x => { window.pout = x; console.log("ok", x); });
+const err = (x => { window.pout = x; console.log("err", x); });
+
+function hex(ab) {
+  const arr = Array.from(new Uint8Array(ab));
+  return arr.map(x => ('0' + x.toString(16)).slice(-2)).join('');
+}
+
+let stateTypes = {
+  "TreeKEM": TreeKEMState,
+  "ART":  ARTState,
+  "Flat": FlatState,
+};
+
+let stateTypeLegends = {
+  "TreeKEM": "Colors represent hash chains. Lightness represents distance along the chain.",
+  "ART":  "DH is indicated by color 'averaging'",
+  "Flat": "Colors indicate different public keys",
+};
+
+let StateType = FlatState;
+let members = [];
+let renderers = {};
+let treeCache = new Tree();
+let operationLock = false;
+let compactEnabled = false;
+
+async function init() {
+  $("div.tree").remove();
+  $("button.update").remove();
+
+  let leaf = base64.random(32);
+  let creator = await StateType.oneMemberGroup(leaf);
+  treeCache.size = 1;
+  treeCache.merge(creator.nodes);
+  addMember(creator);
+}
+
+function selectStateType(label) {
+  let id = "stateType-" + label;
+  $("button.stateType").removeClass("selectedState");
+  $("#" + id).addClass("selectedState");
+  $("#stateTypeLegend").text(stateTypeLegends[label]);
+
+  StateType = stateTypes[label];
+  return init();
+}
+
+function lockWrap(action) {
+  return () => {
+    operationLock = true;
+    $("#buttons button").prop("disabled", true);
+    $("#buttons button.persistent").prop("disabled", false);
+    action()
+      .then(() => {
+        operationLock = false;
+        $("#buttons button").prop("disabled", false);
+      });
+  };
+}
+
+function addMember(m) {
+  m.id = Symbol(m.index);
+  members.push(m);
+
+  // Add a tree
+  let index = m.index;
+  let divID = `tree-${index}`;
+  let tag = $(`<div class="number">${index}</div>`);
+  let div = $(`<div id="${divID}" class="tree"></div>`);
+  div.append(tag);
+  $("#members").append(div);
+
+  // Render
+  let r = new Renderer(divID);
+  r.render(m.size, m.nodes);
+  renderers[m.id] = r;
+
+  // Add an update button
+  let ubutton = $(`<button class="update">Update(${index})</button>`);
+  ubutton.attr("id", `btn-update-${index}`);
+  ubutton.click(lockWrap(() => { return update(index); }));
+  $("#buttons").append(ubutton);
+
+  // Add a delete button
+  let rbutton = $(`<button class="remove">Remove(${index})</button>`);
+  rbutton.attr("id", `btn-remove-${index}`);
+  rbutton.click(lockWrap(() => { return remove(index); }));
+  $("#buttons").append(rbutton);
+
+  // Add a move button
+  let mbutton = $(`<button class="move">Move(${index})</button>`);
+  mbutton.attr("id", `btn-move-${index}`);
+  mbutton.click(lockWrap(() => { return moveToLowestVacant(index); }));
+  $("#buttons").append(mbutton);
+
+  // Add padding
+  $("#buttons").append(document.createTextNode(' '));
+
+  // Activate all buttons
+  $("#buttons button").attr('disabled', false);
+}
+
+function removeMember(index) {
+  removed = members.filter(m => m.index == index)[0];
+  members = members.filter(m => m.index != index);
+
+  delete renderers[removed.id];
+
+  // Remove the associated DOM elements
+  $(`#tree-${index}`).remove();
+  $(`#btn-update-${index}`).remove();
+  $(`#btn-remove-${index}`).remove();
+  $(`#btn-move-${index}`).remove();
+
+  if (members.length == 1) {
+    let lastRemaining = members[0].index;
+    $(`#btn-remove-${lastRemaining}`).attr('disabled', true);
+  }
+}
+
+function moveMember(index, newIndex) {
+  // Renumber the associated DOM elements
+  $(`#tree-${index}`).attr('id', `tree-${newIndex}`);
+  $(`#btn-update-${index}`).attr('id', `btn-update-${newIndex}`);
+  $(`#btn-remove-${index}`).attr('id', `btn-remove-${newIndex}`);
+  $(`#btn-move-${index}`).attr('id', `btn-move-${newIndex}`);
+
+  // Relabel everything
+  $(`#tree-${newIndex} div.number`).text(newIndex);
+  $(`#btn-update-${newIndex}`).text(`Update(${newIndex})`);
+  $(`#btn-remove-${newIndex}`).text(`Remove(${newIndex})`);
+  $(`#btn-move-${newIndex}`).text(`Move(${newIndex})`);
+
+  // Reassign actions
+  $(`#btn-update-${newIndex}`).unbind('click');
+  $(`#btn-remove-${newIndex}`).unbind('click');
+  $(`#btn-move-${newIndex}`).unbind('click');
+  $(`#btn-update-${newIndex}`).click(lockWrap(() => { return update(newIndex); }));
+  $(`#btn-remove-${newIndex}`).click(lockWrap(() => { return remove(newIndex); }));
+  $(`#btn-move-${newIndex}`).click(lockWrap(() => { return moveToLowestVacant(newIndex); }));
+}
+
+function lowestVacant() {
+  let memberIx = members.map(m => m.index);
+  let allIx = [...Array(treeCache.size).keys()];
+  return allIx.filter(i => !memberIx.includes(i))
+              .reduce((a, b) => (a < b)? a : b, Infinity);
+}
+
+function highestOccupied() {
+  return members.map(m => m.index)
+                .reduce((a, b) => (a > b)? a : b, -Infinity);
+}
+
+async function userAdd() {
+  let last = members[members.length - 1];
+  let leaf = base64.random(32);
+  let gik = last.groupInitKey;
+  let ua = await StateType.join(leaf, gik);
+
+  for (let m of members) {
+    await m.handleUserAdd(ua);
+    renderers[m.id].render(m.size, m.nodes);
+  }
+
+  treeCache.size += 1;
+  treeCache.merge(ua.nodes);
+
+  let joiner = await StateType.fromUserAdd(leaf, ua, gik);
+  addMember(joiner);
+}
+
+async function groupAdd() {
+  let last = members[members.length - 1];
+ 
+  let initLeaf = base64.random(32);
+  let initKP = await iota(initLeaf);
+  let ga = await last.add(initKP.publicKey);
+ 
+  for (let m of members) {
+    await m.handleGroupAdd(ga);
+    renderers[m.id].render(m.size, m.nodes);
+  }
+
+  treeCache.size += 1;
+  treeCache.merge(ga.forGroup.nodes);
+
+  let joiner = await StateType.fromGroupAdd(initLeaf, ga);
+  addMember(joiner);
+}
+
+async function update(k) {
+  let leaf = base64.random(32);
+  let member = members.filter(m => m.index == k)[0];
+  let update = await member.update(leaf);
+  
+  for (let m2 of members) {
+    if (m2.index == k) {
+      await m2.handleSelfUpdate(update, leaf);
+    } else {
+      await m2.handleUpdate(update);
+    }
+    renderers[m2.id].render(m2.size, m2.nodes);
+  }
+  
+  treeCache.merge(update.nodes);
+}
+
+async function remove(k) {
+  let leaf = base64.random(32);
+  let candidates = members.filter(m => m.index != k);
+  if (candidates.length == 0) {
+    console.log("Cannot remove last member");
+    return;
+  }
+
+  let remover = candidates[Math.floor(Math.random() * candidates.length)];
+  let removed = members.filter(m => m.index == k)[0];
+  let remove = await remover.remove(leaf, k, removed.copath);
+
+  let newSize = members.map(m => m.index)
+                       .filter(i => i != k)
+                       .reduce((a, b) => (a > b)? a : b, -Infinity);
+  newSize += 1;
+
+  for (let m2 of members) {
+    if (m2.index == k) {
+      continue;
+    }
+
+    await m2.handleRemove(remove);
+    m2.trim(newSize);
+    renderers[m2.id].render(m2.size, m2.nodes);
+  }
+  
+  treeCache.remove(k);
+
+  removeMember(k);
+
+  if (compactEnabled) {
+    compact();
+  }
+}
+
+async function moveToLowestVacant(k) {
+  let minVacant = lowestVacant();
+  if (k < minVacant) {
+    console.log(`Member ${k} is already in the lowest available slot`);
+    return
+  }
+
+  let leaf = base64.random(32);
+  let copath = treeCache.copath(minVacant);
+  let mover = members.filter(m => m.index == k)[0];
+  let move = await mover.move(leaf, minVacant, copath);
+
+  for (let m2 of members) {
+    if (m2.index == k) {
+      await m2.handleSelfMove(move, leaf);
+    } else {
+      await m2.handleMove(move);
+    }
+  }
+
+  treeCache.remove(move.from);
+  treeCache.merge(move.nodes);
+
+  moveMember(k, minVacant);
+
+  let newSize = highestOccupied() + 1;
+  for (let m2 of members) {
+    m2.trim(newSize);
+    renderers[m2.id].render(m2.size, m2.nodes);
+  }
+}
+
+async function compact() {
+  for (let i of members.map(m => m.index).sort()) {
+    await moveToLowestVacant(i);
+  }
+}
+
+let chaosEnabled = false;
+let chaosCount = 0;
+const chaosOnLabel = "&#x1F608;";  // U+1F608 SMILING FACE WITH HORNS
+const chaosOffLabel = "&#x1F610;"; // U+1F610 NEUTRAL FACE
+const chaosDistribution = {
+  "add": 0.3,
+  "update": 0.5,
+  "move": 0.1,
+  "remove": 0.1,
+}
+
+async function startChaos() {
+  const chaosInterval = 1000;
+  const sleep = () => new Promise(res => { setTimeout(res, chaosInterval); });
+
+  while (chaosEnabled) {
+    while (operationLock) {
+      await sleep();
+    }
+
+    // Pick a random button class
+    let dice = Math.random();
+    let target;
+    let cdf = 0;
+    for (let key in chaosDistribution) {
+      cdf += chaosDistribution[key];
+      if (dice < cdf) {
+        target = key;
+        break;
+      }
+    }
+
+    // Click a random button of that class
+    let buttons = $(`#buttons button.${target}`);
+    if (buttons.length == 0) {
+      continue;
+    }
+
+    let pick = Math.floor(Math.random() * buttons.length);
+    console.log(`chaos click (${chaosCount++}):`, buttons[pick].innerText);
+    buttons[pick].click();
+    await sleep();
+  }
+}
+
+const compactOnLabel = "&#x1F312;";  // U+1F312 WAXING CRESENT MOON
+const compactOffLabel = "&#x1F31D;"; // U+1F312 FULL MOON FACE
+
+$(document).ready(async () => {
+  for (let label in stateTypes) {
+    let id = "stateType-" + label;
+    let button = $(`<button id="${id}" class="stateType">${label}</button>`);
+    button.click(lockWrap(() => { return selectStateType(label); }));
+    $("#stateTypes").append(button);
+  }
+
+  $("#userAdd").click(lockWrap(userAdd));
+  $("#groupAdd").click(lockWrap(groupAdd));
+
+  $("#chaos").html(chaosOffLabel);
+  $("#chaos").click(() => {
+    chaosEnabled = !chaosEnabled;
+    $("#chaos").html((chaosEnabled)? chaosOnLabel : chaosOffLabel);
+    
+    if (chaosEnabled) {
+      startChaos();
+    }
+  });
+
+  $("#compact").html(compactOffLabel);
+  $("#compact").click(() => {
+    compactEnabled = !compactEnabled;
+    $("#compact").html((compactEnabled)? compactOnLabel : compactOffLabel);
+  });
+  
+  selectStateType("TreeKEM");
+});
+
+</script>
+<style>
+body {
+  font-family: Menlo, monospace;
+  font-size: 10pt;
+  margin: 0;
+}
+
+#stateTypes, #buttons, div.legend, #members {
+  padding: 2ex;
+  width: 100%;
+}
+
+#stateTypes, #buttons, div.legend {
+  border-bottom: 1px solid #999;
+}
+
+#github {
+  float: right;
+  margin: 1em;
+}
+
+div.legend {
+  background: #ccc;
+  padding: 0 1em;
+}
+
+button {
+  border: 1px solid #999;
+  background: #ccc;
+  font-family: Menlo, monospace;
+  font-size: 10pt;
+  padding: 1ex;
+  box-shadow: 1px 1px;
+}
+
+button.selectedState {
+  background: #99c;
+}
+
+div.number {
+  margin: 0;
+  color: #000;
+  background: #ccc;
+  text-align: center;
+}
+
+div.tree {
+  float: left;
+  margin: 1ex;
+  padding: 0;
+  border: 1px solid black;
+}
+
+div.tree svg {
+  margin: 1ex;
+}
+</style>
+</head>
+
+<body>
+  <div id="github"><a href="https://github.com/bifurcation/treekem">GitHub</a></div>
+  <div id="stateTypes"></div>
+  <div id="buttons">
+    <button id="chaos" title="chaos mode" class="persistent"></button>
+    <button id="compact" title="auto-compact" class="persistent"></button>
+    <button id="userAdd" class="add">UserAdd</button>
+    <button id="groupAdd" class="add">GroupAdd</button>
+  </div>
+  <div class="legend">
+    Filled boxes are nodes with private keys.
+    Empty boxes are nodes with only public keys.
+    Grey boxes are nodes where there is no data.
+    <span id="stateTypeLegend"></span>
+  </div>
+  <div id="members"></div>
+</body>
+
+</html>
