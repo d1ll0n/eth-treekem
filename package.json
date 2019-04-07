@@ -20,7 +20,7 @@
   ],
   "scripts": {
     "watch": "watchify src/*.js -o dist/index.js -v",
-    "build": "browserify src/main.js -o dist/index.js"
+    "build": "browserify src/*.js -o dist/index.js"
   },
   "devDependencies": {
     "browserify": "^16.2.2"

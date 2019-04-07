@@ -2,6 +2,7 @@
 
 const iota = require('./iota');
 const EC = require('./eth-crypto')
+const TreeKEMState = require('./treekem-state');
 
 const hash = EC.hash
 const fingerprint = hash
@@ -252,7 +253,7 @@ async function testRemove(State) {
 }
 
 async function test () {
-  const State = new require('./treekem-state')
+  const State = TreeKEMState;
   await testUserAdd(State);
   await testGroupAdd(State);
   await testUpdate(State, false);

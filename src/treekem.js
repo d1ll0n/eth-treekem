@@ -56,7 +56,7 @@ class TreeKEM {
     let tkem = new TreeKEM();
     tkem.size = 1;
     tkem.index = 0;
-    tkem.merge(TreeKEM.hashUp(0, 1, leaf));
+    tkem.merge(await TreeKEM.hashUp(0, 1, leaf));
     return tkem;
   }
 
@@ -70,7 +70,7 @@ class TreeKEM {
     tkem.index = size;
     tkem.merge(frontier);
 
-    let nodes = TreeKEM.hashUp(2 * tkem.index, tkem.size, leaf);
+    let nodes = await TreeKEM.hashUp(2 * tkem.index, tkem.size, leaf);
     tkem.merge(nodes);
     return tkem;
   }
@@ -484,7 +484,7 @@ async function testSimultaneousUpdate() {
   }));
 
   let secrets = await Promise.all(members.map(async m => {
-    let privateNodes = TreeKEM.hashUp(2 * m.index, m.size, seeds[m.index]);
+    let privateNodes = await TreeKEM.hashUp(2 * m.index, m.size, seeds[m.index]);
 
     const pts = (await Promise.all(cts.map((ct, i) => {
       return (i == m.index)? null : m.decrypt(i, ct.ciphertexts);
