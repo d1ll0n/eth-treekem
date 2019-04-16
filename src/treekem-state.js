@@ -1,7 +1,9 @@
 'use strict';
 
 const TreeKEM = require('./treekem').class;
+const ECKEM = require('./eckem');
 const EC = require('./eth-crypto')
+const iota = require('./iota');
 
 class TreeKEMState {
   constructor() {
