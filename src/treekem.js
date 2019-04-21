@@ -138,7 +138,7 @@ class TreeKEM {
    *
    * Arguments:
    *   * leaf - BufferSource with leaf secret
-   *   * except - index of the node to exclude
+   *   * except - index of the node to exclude (typically use the device encrypting the data)
    *
    * Returns: Promise resolving to a TreeKEMCiphertext object:
    *   {
@@ -163,6 +163,9 @@ class TreeKEM {
     let privateNodes = await TreeKEM.hashUp(2 * except, this.size, leaf);
     let nodes = {};
     for (let n in privateNodes) {
+      if (isNaN(n)) {
+        continue; // filter out NaNs because they create confusion
+      }
       nodes[n] = util.publicNode(privateNodes[n]);
     }
 
@@ -217,7 +220,11 @@ class TreeKEM {
 
     console.log('-------decrypt-------')
     console.log(encryptions[decNode])
-    console.log(this.nodes[decNode].private)
+    if (this.nodes[decNode] == null) {
+      debugger;
+    } else {
+      console.log(this.nodes[decNode].private)
+    }
     let h = await ECKEM.decrypt(encryptions[decNode], this.nodes[decNode].private);
     
     // Hash up to the root (plus one if we're growing the tree)
@@ -435,9 +442,9 @@ async function testEncryptDecrypt() {
 
   // Have each member send and be received by all members
   for (const m of members) {
-    let ct = await m.encrypt(seed);
-    let privateNodes = await TreeKEM.hashUp(2 * m.index, m.size, seed);
+    let ct = await m.encrypt(seed, m.index);
     m.merge(ct.nodes)
+    let privateNodes = await TreeKEM.hashUp(2 * m.index, m.size, seed);
     m.merge(privateNodes);
 
     for (let m2 of members) {
@@ -461,6 +468,9 @@ async function testEncryptDecrypt() {
       m2.merge(ct.nodes);
       m2.merge(pt.nodes);
 
+      // TODO there requires a conversion to eth-crypto cipher format
+      // https://github.com/d1ll0n/eth-treekem/issues/4
+      // console.log(EC.decryptWithPrivateKey(JSON.parse(ct.ciphertexts[0][2]), m2.nodes[m2.index].private))
       let eq = await m.equal(m2);
       if (!eq) {
         console.log("error:", m.index, "->", m2.index);
