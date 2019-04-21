@@ -156,16 +156,12 @@ class TreeKEM {
    *   }
    */
   async encrypt(leaf, except) {
-    let dirpath = tm.dirpath(2 * except, this.size);
     let copath = tm.copath(2 * except, this.size);
 
     // Generate hashes up the tree
     let privateNodes = await TreeKEM.hashUp(2 * except, this.size, leaf);
     let nodes = {};
     for (let n in privateNodes) {
-      if (isNaN(n)) {
-        continue; // filter out NaNs because they create confusion
-      }
       nodes[n] = util.publicNode(privateNodes[n]);
     }
 
@@ -218,13 +214,13 @@ class TreeKEM {
                         .map(x => parseInt(x))
                         .filter(x => dirpath.includes(x))[0];
 
-    console.log('-------decrypt-------')
-    console.log(encryptions[decNode])
-    if (this.nodes[decNode] == null) {
-      debugger;
-    } else {
-      console.log(this.nodes[decNode].private)
-    }
+    // console.log('-------decrypt-------')
+    // console.log(encryptions[decNode])
+    // if (this.nodes[decNode] == null) {
+    //   debugger;
+    // } else {
+    //   console.log(this.nodes[decNode].private)
+    // }
     let h = await ECKEM.decrypt(encryptions[decNode], this.nodes[decNode].private);
     
     // Hash up to the root (plus one if we're growing the tree)
@@ -353,7 +349,6 @@ class TreeKEM {
       }
   
       n = tm.parent(n, size);
-      console.log(n)
       path.push(n);
       h = hash(h);
     }
@@ -392,7 +387,6 @@ async function testMembers(size) {
   let nodeWidth = tm.nodeWidth(size);
   let keyPairs = [...Array(nodeWidth).keys()].map(i => {
     const kp = iota(new Uint8Array([i]))
-    console.log(kp.publicKey)
     return kp
   })
 
@@ -451,12 +445,7 @@ async function testEncryptDecrypt() {
       if (m2.index == m.index) {
         continue;
       }
-      m.dump('m')
-      m2.dump('m2')
-
       let pt = JSON.parse(JSON.stringify(await m2.decrypt(m.index, ct.ciphertexts)))
-      console.log(pt)
-      console.log(typeof pt)
       if (!arrayBufferEqual(ct.root, pt.root)) {
         console.log("error:", m.index, "->", m2.index);
         console.log("send:", hex(ct.root));
@@ -468,9 +457,6 @@ async function testEncryptDecrypt() {
       m2.merge(ct.nodes);
       m2.merge(pt.nodes);
 
-      // TODO there requires a conversion to eth-crypto cipher format
-      // https://github.com/d1ll0n/eth-treekem/issues/4
-      // console.log(EC.decryptWithPrivateKey(JSON.parse(ct.ciphertexts[0][2]), m2.nodes[m2.index].private))
       let eq = await m.equal(m2);
       if (!eq) {
         console.log("error:", m.index, "->", m2.index);
