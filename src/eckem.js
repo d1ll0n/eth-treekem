@@ -18,8 +18,6 @@ async function encrypt(pt, pubA) {
   const kpE = EC.newKeyPair()
   const secret = await kpE.computeSecret(pubA)
   const cipher = EC.cbcEncrypt(pt, secret)
-  console.log('------plaintext------')
-  console.log(pt)
   return JSON.stringify({ pub: kpE.publicKey, cipher })
 }
 
@@ -35,8 +33,6 @@ async function decrypt(_cipherData, priv) {
   const { cipher, pub } = cipherData
   const secret = await EC.computeSecret(priv, pub)
   const pt = EC.decrypt(cipher, secret)
-  console.log('------decipher-------')
-  console.log(pt)
   return pt
 }
 

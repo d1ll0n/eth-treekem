@@ -27,7 +27,7 @@ function encryptWithPublicKey(publicKey, message, serialize = true) {
 
 function decryptWithPrivateKey(cipher, privateKey) {
   const _cipher = typeof cipher == 'string' ? parseCipher(cipher) : cipher
-  return ecDecryptWithPrivateKey(_cipher, privateKey)
+  return ecDecryptWithPrivateKey(privateKey, _cipher)
 }
 
 module.exports = {

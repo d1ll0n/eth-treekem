@@ -9,7 +9,7 @@ function log2(x) {
 }
 
 function level(x) {
-  if ((x & 0x01) == 0) {
+  if ((x & 0x01) == 0) { // if even
     return 0;
   }
 

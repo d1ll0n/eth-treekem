@@ -138,7 +138,7 @@ class TreeKEM {
    *
    * Arguments:
    *   * leaf - BufferSource with leaf secret
-   *   * except - index of the node to exclude
+   *   * except - index of the node to exclude (typically use the device encrypting the data)
    *
    * Returns: Promise resolving to a TreeKEMCiphertext object:
    *   {
@@ -156,7 +156,6 @@ class TreeKEM {
    *   }
    */
   async encrypt(leaf, except) {
-    let dirpath = tm.dirpath(2 * except, this.size);
     let copath = tm.copath(2 * except, this.size);
 
     // Generate hashes up the tree
@@ -215,9 +214,13 @@ class TreeKEM {
                         .map(x => parseInt(x))
                         .filter(x => dirpath.includes(x))[0];
 
-    console.log('-------decrypt-------')
-    console.log(encryptions[decNode])
-    console.log(this.nodes[decNode].private)
+    // console.log('-------decrypt-------')
+    // console.log(encryptions[decNode])
+    // if (this.nodes[decNode] == null) {
+    //   debugger;
+    // } else {
+    //   console.log(this.nodes[decNode].private)
+    // }
     let h = await ECKEM.decrypt(encryptions[decNode], this.nodes[decNode].private);
     
     // Hash up to the root (plus one if we're growing the tree)
@@ -346,7 +349,6 @@ class TreeKEM {
       }
   
       n = tm.parent(n, size);
-      console.log(n)
       path.push(n);
       h = hash(h);
     }
@@ -385,7 +387,6 @@ async function testMembers(size) {
   let nodeWidth = tm.nodeWidth(size);
   let keyPairs = [...Array(nodeWidth).keys()].map(i => {
     const kp = iota(new Uint8Array([i]))
-    console.log(kp.publicKey)
     return kp
   })
 
@@ -435,21 +436,16 @@ async function testEncryptDecrypt() {
 
   // Have each member send and be received by all members
   for (const m of members) {
-    let ct = await m.encrypt(seed);
-    let privateNodes = await TreeKEM.hashUp(2 * m.index, m.size, seed);
+    let ct = await m.encrypt(seed, m.index);
     m.merge(ct.nodes)
+    let privateNodes = await TreeKEM.hashUp(2 * m.index, m.size, seed);
     m.merge(privateNodes);
 
     for (let m2 of members) {
       if (m2.index == m.index) {
         continue;
       }
-      m.dump('m')
-      m2.dump('m2')
-
       let pt = JSON.parse(JSON.stringify(await m2.decrypt(m.index, ct.ciphertexts)))
-      console.log(pt)
-      console.log(typeof pt)
       if (!arrayBufferEqual(ct.root, pt.root)) {
         console.log("error:", m.index, "->", m2.index);
         console.log("send:", hex(ct.root));
@@ -473,14 +469,14 @@ async function testEncryptDecrypt() {
 }
 
 async function testSimultaneousUpdate() {
-  const testGroupSize = 5;
+  const testGroupSize = 2;
   let members = await testMembers(testGroupSize);
 
   // Have each member emit an update, then have everyone compute and
   // apply a merged update
   let seeds = members.map(m => new Uint8Array([m.index]));
   let cts = await Promise.all(members.map(m => {
-    return m.encrypt(seeds[m.index]);
+    return m.encrypt(seeds[m.index], m.index);
   }));
 
   let secrets = await Promise.all(members.map(async m => {
@@ -526,8 +522,6 @@ async function testSimultaneousUpdate() {
       let eq = await m1.equal(m2);
       if (!eq) {
         console.log("error:", m1.index, "!=", m2.index);
-        await m1.dump();
-        await m2.dump();
         throw 'tkem-simultaneous-tree';
       }
     }
