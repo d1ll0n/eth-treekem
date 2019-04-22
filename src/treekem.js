@@ -469,14 +469,14 @@ async function testEncryptDecrypt() {
 }
 
 async function testSimultaneousUpdate() {
-  const testGroupSize = 5;
+  const testGroupSize = 2;
   let members = await testMembers(testGroupSize);
 
   // Have each member emit an update, then have everyone compute and
   // apply a merged update
   let seeds = members.map(m => new Uint8Array([m.index]));
   let cts = await Promise.all(members.map(m => {
-    return m.encrypt(seeds[m.index]);
+    return m.encrypt(seeds[m.index], m.index);
   }));
 
   let secrets = await Promise.all(members.map(async m => {
@@ -522,8 +522,6 @@ async function testSimultaneousUpdate() {
       let eq = await m1.equal(m2);
       if (!eq) {
         console.log("error:", m1.index, "!=", m2.index);
-        await m1.dump();
-        await m2.dump();
         throw 'tkem-simultaneous-tree';
       }
     }
